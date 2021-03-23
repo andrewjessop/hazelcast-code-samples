@@ -3,6 +3,7 @@ import com.hazelcast.core.Hazelcast;
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.map.IMap;
 import com.hazelcast.query.Predicate;
+import com.hazelcast.query.Predicates;
 import com.hazelcast.config.*;
 import com.hazelcast.client.*;
 import com.hazelcast.partition.*;
@@ -10,6 +11,7 @@ import com.hazelcast.cluster.Cluster;
 
 import java.util.Random;
 import java.util.Set;
+import java.util.Collection;
 import java.util.UUID;
 
 
@@ -118,6 +120,12 @@ public class FastAggregationsDemo {
 		}
         System.out.println();
 
+        // AJ: complicated predicate-based query
+        for (int i = 0; i < 5; i++) {
+			complicatedQuery(employees);
+		}
+        System.out.println();
+
         Hazelcast.shutdownAll();
     }
 
@@ -133,12 +141,15 @@ public class FastAggregationsDemo {
     private static void companyBasedSalaryAverage(IMap<String, Employee> employees) {
 		long startTime = System.nanoTime();
         // create the Predicate to select only Hazelcast employees
-        Predicate<String, Employee> companyPredicate = new CompanyPredicate("Hazelcast");
+        //Predicate<String, Employee> companyPredicate = new CompanyPredicate("Hazelcast");
 
+		java.util.function.Predicate<Employee> companyPredicate = (employee) -> employee.getCompanyName().equals("Hazelcast");
+
+		Predicate<String, Employee> newPredicate = (entry) -> companyPredicate.test(entry.getValue());
         // execute the aggregation and print the result
-        double avgSalary = employees.aggregate(Aggregators.integerAvg("salaryPerMonth"), companyPredicate);
+        double avgSalary = employees.aggregate(Aggregators.integerAvg("salaryPerMonth"), (java.io.Serializable & Predicate<String, Employee>) newPredicate);
 		double totalTime = (System.nanoTime() - startTime)/1E9;
-        System.out.println("Hazelcast average salary: " + avgSalary + " in " + totalTime + "secs");
+        System.out.println("Hazelcast average salary (with serialized lambda): " + avgSalary + " in " + totalTime + "secs");
     }
 
     private static void salarySum(IMap<String, Employee> employees) {
@@ -165,11 +176,26 @@ public class FastAggregationsDemo {
         System.out.println("All first names: " + allFirstNames + " in " + totalTime + "secs");
     }
 
+    private static void complicatedQuery(IMap<String, Employee> employees) {
+		long startTime = System.nanoTime();
+
+
+		Predicate<String, Employee> first = (entry) -> entry.getValue().getCompanyName().equals("Hazelcast");
+		Predicate<String, Employee> fancyPredicate = Predicates.and(
+				first,
+				Predicates.greaterThan("SalaryPerMonth", 4000)
+				);
+		Collection<?> results = employees.values(fancyPredicate);
+
+		double totalTime = (System.nanoTime() - startTime)/1E9;
+        System.out.println("complicatedQuery: " + results.size() + " rows in " + totalTime + "secs");
+    }
+
     private static void fillEmployeeMap(IMap<String, Employee> employees) {
         System.out.println("Employee map generation started.");
 		long startTime = System.nanoTime();
         Random random = new Random();
-        for (int i = 0; i < 2E6; i++) {
+        for (int i = 0; i < 2E5; i++) {
             String companyName = COMPANIES[random.nextInt(COMPANIES.length)];
             String firstName = FIRST_NAMES[random.nextInt(FIRST_NAMES.length)];
             String lastName = LAST_NAMES[random.nextInt(LAST_NAMES.length)];
